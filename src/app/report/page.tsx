@@ -142,7 +142,10 @@ export default function ReportPage() {
             )}
 
             {step === 'voice-input' && (
-              <VoiceInput onComplete={handleVoiceComplete} />
+              <VoiceInput 
+                onComplete={handleVoiceComplete} 
+                initialResponses={responses}
+              />
             )}
 
             {step === 'preview' && selectedStaff && (

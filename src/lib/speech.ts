@@ -1,12 +1,50 @@
+interface ISpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+}
+
+interface SpeechRecognitionEvent {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  [index: number]: SpeechRecognitionAlternative;
+  isFinal: boolean;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string;
+}
+
 export class SpeechRecognition {
-  private recognition: any;
+  private recognition: ISpeechRecognition | null = null;
   private isListening = false;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        this.recognition = new SpeechRecognition();
+      const win = window as Window & { 
+        SpeechRecognition?: new () => ISpeechRecognition;
+        webkitSpeechRecognition?: new () => ISpeechRecognition;
+      };
+      const SpeechRecognitionConstructor = win.SpeechRecognition || win.webkitSpeechRecognition;
+      if (SpeechRecognitionConstructor) {
+        this.recognition = new SpeechRecognitionConstructor() as ISpeechRecognition;
         this.recognition.continuous = true;
         this.recognition.interimResults = true;
         this.recognition.lang = 'ja-JP';
@@ -26,7 +64,7 @@ export class SpeechRecognition {
 
     this.isListening = true;
 
-    this.recognition.onresult = (event: any) => {
+    this.recognition.onresult = (event: SpeechRecognitionEvent) => {
       let transcript = '';
       let isFinal = false;
 
@@ -40,7 +78,7 @@ export class SpeechRecognition {
       onResult(transcript, isFinal);
     };
 
-    this.recognition.onerror = (event: any) => {
+    this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       onError(event.error);
       this.isListening = false;
     };

@@ -31,7 +31,7 @@ export interface Database {
           id: string;
           staff_id: string;
           date: string;
-          raw_responses: any;
+          raw_responses: Record<string, unknown>;
           formatted_report: string;
           created_at: string;
         };
@@ -39,7 +39,7 @@ export interface Database {
           id?: string;
           staff_id: string;
           date: string;
-          raw_responses: any;
+          raw_responses: Record<string, unknown>;
           formatted_report: string;
           created_at?: string;
         };
@@ -47,7 +47,7 @@ export interface Database {
           id?: string;
           staff_id?: string;
           date?: string;
-          raw_responses?: any;
+          raw_responses?: Record<string, unknown>;
           formatted_report?: string;
           created_at?: string;
         };

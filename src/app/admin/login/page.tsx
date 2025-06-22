@@ -31,7 +31,7 @@ export default function AdminLogin() {
       } else {
         setError('パスワードが正しくありません');
       }
-    } catch (err) {
+    } catch {
       setError('ログインに失敗しました');
     } finally {
       setIsLoading(false);

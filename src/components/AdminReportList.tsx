@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Report, Staff } from '@/types/report';
+import { Report, Staff, VoiceResponse } from '@/types/report';
 
 interface ReportWithStaff extends Report {
   staff: Staff;
@@ -206,7 +206,7 @@ export default function AdminReportList() {
               <div className="border-t pt-6">
                 <h4 className="font-semibold text-gray-800 mb-4">音声入力の詳細</h4>
                 <div className="space-y-3">
-                  {selectedReport.raw_responses.map((response: any, index: number) => (
+                  {selectedReport.raw_responses.map((response: VoiceResponse, index: number) => (
                     <div key={index} className="border-l-4 border-blue-500 pl-4">
                       <p className="text-sm font-medium text-gray-700">
                         質問 {index + 1}: {response.question}
