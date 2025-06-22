@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { SpeechRecognition } from '@/lib/speech';
+import { useState, useEffect } from 'react';
 import { VoiceResponse, REPORT_QUESTIONS } from '@/types/report';
-import { correctTranscription } from '@/lib/gemini';
+import VoiceInputAqua from './VoiceInputAqua';
 
 interface VoiceInputProps {
   onComplete: (responses: VoiceResponse[]) => void;
@@ -13,21 +12,8 @@ interface VoiceInputProps {
 export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceInputProps) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [responses, setResponses] = useState<VoiceResponse[]>(initialResponses);
-  const [isListening, setIsListening] = useState(false);
-  const [currentTranscript, setCurrentTranscript] = useState('');
-  const [rawTranscript, setRawTranscript] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [speechSupported, setSpeechSupported] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [isVoiceInputOpen, setIsVoiceInputOpen] = useState(false);
   const [editingAnswer, setEditingAnswer] = useState('');
-  const [isEditingCurrent, setIsEditingCurrent] = useState(false);
-  
-  const speechRef = useRef<SpeechRecognition | null>(null);
-
-  useEffect(() => {
-    speechRef.current = new SpeechRecognition();
-    setSpeechSupported(speechRef.current.isSupported());
-  }, []);
 
   useEffect(() => {
     // 既存の回答がある場合、現在の質問のインデックスを調整
@@ -35,69 +21,15 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
       const lastAnsweredIndex = Math.max(...initialResponses.map(r => r.questionIndex));
       setCurrentQuestionIndex(Math.min(lastAnsweredIndex + 1, REPORT_QUESTIONS.length - 1));
       
-      // 現在の質問に既存の回答がある場合は編集モードに
+      // 現在の質問に既存の回答がある場合
       const currentAnswer = initialResponses.find(r => r.questionIndex === currentQuestionIndex);
       if (currentAnswer) {
         setEditingAnswer(currentAnswer.answer);
-        setIsEditingCurrent(true);
       }
     }
   }, [initialResponses, currentQuestionIndex]);
 
-  const startListening = () => {
-    if (!speechRef.current) return;
-    
-    setIsListening(true);
-    setRawTranscript('');
-    setCurrentTranscript('');
-    setError(null);
-
-    speechRef.current.startListening(
-      (transcript) => {
-        setRawTranscript(transcript);
-      },
-      (error) => {
-        setError(`音声認識エラー: ${error}`);
-        setIsListening(false);
-      }
-    );
-  };
-
-  const stopListening = async () => {
-    if (speechRef.current) {
-      speechRef.current.stopListening();
-    }
-    setIsListening(false);
-
-    if (rawTranscript.trim()) {
-      setIsProcessing(true);
-      try {
-        // Gemini APIで文脈補正
-        const correctedText = await correctTranscription(
-          rawTranscript.trim(),
-          REPORT_QUESTIONS[currentQuestionIndex]
-        );
-        
-        // 既存の回答と結合するか、新規作成
-        const finalText = editingAnswer 
-          ? `${editingAnswer} ${correctedText}`
-          : correctedText;
-        
-        setCurrentTranscript(finalText);
-        setEditingAnswer(finalText);
-      } catch (error) {
-        console.error('Error processing transcript:', error);
-        setCurrentTranscript(rawTranscript.trim());
-        setEditingAnswer(rawTranscript.trim());
-      } finally {
-        setIsProcessing(false);
-        setRawTranscript('');
-      }
-    }
-  };
-
-  const handleAnswerComplete = () => {
-    const answer = editingAnswer || currentTranscript;
+  const handleVoiceInputComplete = (answer: string) => {
     if (!answer.trim()) return;
 
     const newResponse: VoiceResponse = {
@@ -117,51 +49,54 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
     }
 
     setResponses(updatedResponses);
-    setCurrentTranscript('');
-    setEditingAnswer('');
-    setIsEditingCurrent(false);
+    setEditingAnswer(answer.trim());
+    setIsVoiceInputOpen(false);
+
+    // 最後の質問でない場合は次へ
+    if (currentQuestionIndex < REPORT_QUESTIONS.length - 1) {
+      setTimeout(() => {
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+        setEditingAnswer('');
+      }, 500);
+    }
+  };
+
+  const handleManualComplete = () => {
+    if (!editingAnswer.trim()) return;
+
+    const newResponse: VoiceResponse = {
+      question: REPORT_QUESTIONS[currentQuestionIndex],
+      answer: editingAnswer.trim(),
+      questionIndex: currentQuestionIndex
+    };
+
+    // 既存の回答を更新するか、新規追加
+    const existingIndex = responses.findIndex(r => r.questionIndex === currentQuestionIndex);
+    let updatedResponses;
+    if (existingIndex >= 0) {
+      updatedResponses = [...responses];
+      updatedResponses[existingIndex] = newResponse;
+    } else {
+      updatedResponses = [...responses, newResponse].sort((a, b) => a.questionIndex - b.questionIndex);
+    }
+
+    setResponses(updatedResponses);
 
     if (currentQuestionIndex < REPORT_QUESTIONS.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
-    } else {
-      onComplete(updatedResponses);
+      setEditingAnswer('');
     }
   };
 
   const goToQuestion = (index: number) => {
     setCurrentQuestionIndex(index);
     const existingAnswer = responses.find(r => r.questionIndex === index);
-    if (existingAnswer) {
-      setEditingAnswer(existingAnswer.answer);
-      setIsEditingCurrent(true);
-    } else {
-      setEditingAnswer('');
-      setIsEditingCurrent(false);
-    }
-    setCurrentTranscript('');
-    stopListening();
+    setEditingAnswer(existingAnswer ? existingAnswer.answer : '');
   };
-
-  const handleEditChange = (value: string) => {
-    setEditingAnswer(value);
-    setCurrentTranscript(value);
-  };
-
-  if (!speechSupported) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-red-600 mb-4">
-          お使いのブラウザは音声入力に対応していません
-        </p>
-        <p className="text-gray-600">
-          Chrome、Safari、Edgeなどの対応ブラウザをご利用ください
-        </p>
-      </div>
-    );
-  }
 
   const currentQuestion = REPORT_QUESTIONS[currentQuestionIndex];
   const progress = ((responses.length) / REPORT_QUESTIONS.length) * 100;
+  const currentAnswer = responses.find(r => r.questionIndex === currentQuestionIndex);
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -189,52 +124,38 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
         </p>
       </div>
 
-      {/* 音声入力エリア */}
+      {/* 入力エリア */}
       <div className="bg-white rounded-lg border-2 border-gray-200 p-6 mb-6">
+        {/* 音声入力ボタン */}
         <div className="text-center mb-4">
           <button
-            onClick={isListening ? stopListening : startListening}
-            disabled={isProcessing}
-            className={`w-20 h-20 rounded-full flex items-center justify-center text-3xl transition-all duration-200 ${
-              isListening 
-                ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse' 
-                : isProcessing
-                  ? 'bg-gray-400 text-white cursor-not-allowed'
-                  : 'bg-blue-500 hover:bg-blue-600 text-white'
-            }`}
+            onClick={() => setIsVoiceInputOpen(true)}
+            className="group relative w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
           >
-            {isListening ? '⏹️' : isProcessing ? '⌛' : '🎤'}
+            <span className="text-3xl">🎤</span>
+            <div className="absolute inset-0 rounded-full bg-blue-400 opacity-0 group-hover:opacity-20 animate-ping"></div>
           </button>
-          <p className="mt-2 text-sm text-gray-600">
-            {isListening ? 'お話しください...' : isProcessing ? '処理中...' : 'マイクボタンを押して開始'}
+          <p className="mt-3 text-sm text-gray-600">
+            マイクボタンを押して音声入力
           </p>
         </div>
 
-        {/* 認識中の音声（ぼかし表示） */}
-        {isListening && rawTranscript && (
-          <div className="bg-gray-100 rounded p-4 mb-4 relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-gray-100 to-transparent animate-pulse"></div>
-            <p className="text-gray-400 blur-sm select-none">{rawTranscript}</p>
-          </div>
-        )}
+        {/* テキスト編集エリア */}
+        <div className="mb-4">
+          <textarea
+            value={editingAnswer}
+            onChange={(e) => setEditingAnswer(e.target.value)}
+            className="w-full p-4 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            rows={4}
+            placeholder="音声入力または直接入力してください..."
+          />
+        </div>
 
-        {/* 既存の回答または処理済みテキスト */}
-        {(editingAnswer || currentTranscript) && !isListening && (
-          <div className="mb-4">
-            <textarea
-              value={editingAnswer || currentTranscript}
-              onChange={(e) => handleEditChange(e.target.value)}
-              className="w-full p-4 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              rows={4}
-              placeholder="回答を入力または編集してください..."
-            />
-          </div>
-        )}
-
-        {/* エラー表示 */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded p-4 mb-4">
-            <p className="text-red-700">{error}</p>
+        {/* 既存の回答がある場合の表示 */}
+        {currentAnswer && currentAnswer.answer !== editingAnswer && (
+          <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm text-gray-600 mb-1">保存済みの回答:</p>
+            <p className="text-gray-800">{currentAnswer.answer}</p>
           </div>
         )}
       </div>
@@ -252,12 +173,12 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
         
         <div className="flex-1"></div>
         
-        {(editingAnswer || currentTranscript) && (
+        {editingAnswer.trim() && (
           <button
-            onClick={handleAnswerComplete}
+            onClick={handleManualComplete}
             className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition duration-200"
           >
-            {isEditingCurrent ? '更新して次へ' : '次へ'} →
+            {currentAnswer ? '更新して次へ' : '次へ'} →
           </button>
         )}
       </div>
@@ -314,6 +235,16 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
             すべての回答を確認して次へ
           </button>
         </div>
+      )}
+
+      {/* AQUA VOICEスタイルの音声入力モーダル */}
+      {isVoiceInputOpen && (
+        <VoiceInputAqua
+          questionText={currentQuestion}
+          onComplete={handleVoiceInputComplete}
+          onCancel={() => setIsVoiceInputOpen(false)}
+          initialValue={editingAnswer}
+        />
       )}
     </div>
   );
