@@ -17,9 +17,12 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
   
   // 音声入力関連の状態
   const [isListening, setIsListening] = useState(false);
-  const [rawTranscript, setRawTranscript] = useState('');
+  const [confirmedSegments, setConfirmedSegments] = useState<string[]>([]);
+  const [pendingTranscript, setPendingTranscript] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showError, setShowError] = useState(false);
+  const [processedFinalTranscripts, setProcessedFinalTranscripts] = useState<Set<string>>(new Set());
   
   const speechRef = useRef<SpeechRecognition | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -40,16 +43,45 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
     }
   }, [initialResponses, currentQuestionIndex]);
 
+  // ファイナルテキストを処理
+  const processFinalTranscript = async (finalText: string) => {
+    if (!finalText.trim() || processedFinalTranscripts.has(finalText)) return;
+    
+    setProcessedFinalTranscripts(prev => new Set(prev).add(finalText));
+    setIsProcessing(true);
+    
+    try {
+      // 🎯 音声入力エリアのテキストのみGemini補正を適用
+      const corrected = await correctTranscription(finalText.trim());
+      setConfirmedSegments(prev => [...prev, corrected]);
+    } catch (error) {
+      console.error('Error processing transcript:', error);
+      // エラー時は元のテキストをそのまま使用
+      setConfirmedSegments(prev => [...prev, finalText.trim()]);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const startListening = () => {
     if (!speechRef.current) return;
     
     setIsListening(true);
-    setRawTranscript('');
+    setPendingTranscript('');
     setError(null);
+    // 新しい音声入力セッション開始時にリセット
+    setProcessedFinalTranscripts(new Set());
 
     speechRef.current.startListening(
-      (transcript) => {
-        setRawTranscript(transcript);
+      (transcript, isFinal) => {
+        if (isFinal) {
+          // ファイナル結果：即座に確定処理
+          processFinalTranscript(transcript);
+          setPendingTranscript(''); // ファイナル後はペンディングをクリア
+        } else {
+          // 暫定結果：モザイク表示用
+          setPendingTranscript(transcript);
+        }
       },
       (error) => {
         setError(`音声認識エラー: ${error}`);
@@ -58,42 +90,44 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
     );
   };
 
-  const stopListening = async () => {
+  const stopListening = () => {
     if (speechRef.current) {
       speechRef.current.stopListening();
     }
     setIsListening(false);
 
-    if (rawTranscript.trim()) {
-      setIsProcessing(true);
-      try {
-        // Gemini APIで文脈補正
-        const correctedText = await correctTranscription(
-          rawTranscript.trim()
-        );
-        
-        // 既存のテキストに追加（または新規作成）
-        const newText = editingAnswer 
-          ? `${editingAnswer} ${correctedText}`
-          : correctedText;
-        
-        setEditingAnswer(newText);
-      } catch (error) {
-        console.error('Error processing transcript:', error);
-        // エラー時は元のテキストをそのまま使用
-        const newText = editingAnswer 
-          ? `${editingAnswer} ${rawTranscript.trim()}`
-          : rawTranscript.trim();
-        setEditingAnswer(newText);
-      } finally {
-        setIsProcessing(false);
-        setRawTranscript('');
-      }
+    // 残っている未確定テキストがあれば処理
+    if (pendingTranscript.trim()) {
+      processFinalTranscript(pendingTranscript);
     }
+
+    // 全ての音声入力内容を通常のテキストエリアに統合
+    setTimeout(() => {
+      const allVoiceText = confirmedSegments
+        .filter(text => text.trim())
+        .join(' ');
+      
+      if (allVoiceText) {
+        // 🎯 ここでは補正なし、そのまま統合
+        const newText = editingAnswer 
+          ? `${editingAnswer} ${allVoiceText}`
+          : allVoiceText;
+        setEditingAnswer(newText);
+      }
+      
+      // 音声入力エリアをクリア
+      setConfirmedSegments([]);
+      setPendingTranscript('');
+      setProcessedFinalTranscripts(new Set());
+    }, 500); // 処理完了を待つため少し長めに
   };
 
   const handleSaveAnswer = () => {
-    if (!editingAnswer.trim()) return;
+    if (!editingAnswer.trim()) {
+      setShowError(true);
+      setTimeout(() => setShowError(false), 3000);
+      return;
+    }
 
     const newResponse: VoiceResponse = {
       question: REPORT_QUESTIONS[currentQuestionIndex],
@@ -213,19 +247,49 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
               placeholder="音声入力ボタンを押して話すか、こちらに直接入力してください..."
             />
             
-            {/* 音声認識中のオーバーレイ（モザイク表示） */}
-            {(isListening || isProcessing) && rawTranscript && (
-              <div className="absolute inset-0 bg-black/5 rounded-xl flex items-end p-6">
-                <div className="bg-white/90 backdrop-blur-sm rounded-lg p-4 w-full">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-red-500 animate-pulse' : 'bg-gray-500'}`}></div>
-                    <span className="text-xs text-gray-600">
-                      {isListening ? '音声認識中...' : '処理中...'}
-                    </span>
+            {/* 音声入力中のオーバーレイ */}
+            {isListening && (confirmedSegments.length > 0 || pendingTranscript) && (
+              <div className="absolute inset-0 bg-white/95 backdrop-blur-sm rounded-xl p-6 overflow-y-auto">
+                <div className="mb-4">
+                  <div className="flex items-center space-x-2 mb-3">
+                    <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                    <span className="text-sm font-medium text-gray-700">音声入力中</span>
                   </div>
-                  <div className="text-gray-500 blur-sm select-none">
-                    {rawTranscript}
+                  
+                  {/* 確定済みテキスト */}
+                  <div className="space-y-2">
+                    {confirmedSegments.map((segment, index) => (
+                      <div key={index} className="text-gray-800 leading-relaxed">
+                        {segment}
+                      </div>
+                    ))}
+                    
+                    {/* 未確定テキスト（モザイク表示） */}
+                    {pendingTranscript && (
+                      <div className="relative">
+                        <div className="text-gray-500 blur-sm select-none leading-relaxed">
+                          {pendingTranscript}
+                        </div>
+                        {isProcessing && (
+                          <div className="absolute inset-0 flex items-center">
+                            <div className="text-xs text-blue-600 bg-white px-2 py-1 rounded">
+                              処理中...
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
+                </div>
+                
+                {/* ストップボタン */}
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <button
+                    onClick={stopListening}
+                    className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition duration-200 text-sm"
+                  >
+                    ⏹️ 停止して挿入
+                  </button>
                 </div>
               </div>
             )}
@@ -236,14 +300,11 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
               {editingAnswer.length} 文字
             </div>
             
-            {/* 回答保存ボタン */}
-            {editingAnswer.trim() && (
-              <button
-                onClick={handleSaveAnswer}
-                className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition duration-200 text-sm"
-              >
-                {currentAnswer ? '回答を更新して次へ' : '回答を保存して次へ'} →
-              </button>
+            {/* エラーメッセージ */}
+            {showError && (
+              <div className="text-sm text-red-600 font-medium">
+                回答内容を入力してください
+              </div>
             )}
           </div>
         </div>
@@ -282,6 +343,14 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
         )}
         
         <div className="flex-1"></div>
+        
+        {/* 回答保存ボタン（常時表示） */}
+        <button
+          onClick={handleSaveAnswer}
+          className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition duration-200 text-sm"
+        >
+          {currentAnswer ? '回答を更新して次へ' : '回答を保存して次へ'} →
+        </button>
       </div>
 
       {/* 質問ナビゲーション（コンパクト版） */}

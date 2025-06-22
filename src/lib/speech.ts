@@ -65,17 +65,28 @@ export class SpeechRecognition {
     this.isListening = true;
 
     this.recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let transcript = '';
-      let isFinal = false;
+      let interimTranscript = '';
+      let finalTranscript = '';
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
+      // 全ての結果を処理（過去の結果も含む）
+      for (let i = 0; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          isFinal = true;
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
         }
       }
 
-      onResult(transcript, isFinal);
+      // 最終的な結果がある場合
+      if (finalTranscript) {
+        onResult(finalTranscript, true);
+      }
+      
+      // 暫定的な結果がある場合
+      if (interimTranscript) {
+        onResult(interimTranscript, false);
+      }
     };
 
     this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
