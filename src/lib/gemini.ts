@@ -4,25 +4,24 @@ import { VoiceResponse } from '@/types/report';
 const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY!;
 const genAI = new GoogleGenerativeAI(apiKey);
 
-export async function correctTranscription(rawText: string, context: string): Promise<string> {
+export async function correctTranscription(rawText: string): Promise<string> {
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
     
-    const prompt = `以下の音声入力テキストを、文脈を考慮して適切な漢字変換と句読点の追加を行ってください。
-美容室での日報作成の回答であることを前提に、自然な日本語に補正してください。
-
-質問の文脈: ${context}
+    const prompt = `以下の音声入力テキストを最小限の補正のみ行ってください。
+話した内容をそのまま尊重し、必要最小限の修正のみを実施してください。
 
 音声入力テキスト: ${rawText}
 
 補正ルール:
-- 適切な漢字変換を行う
+- 明らかな誤字・脱字のみを修正
 - 句読点を自然な位置に追加
-- 誤認識を文脈から推測して修正
-- 音声入力の内容を保持しつつ、読みやすい文章にする
-- 余計な装飾や説明は加えない
+- ひらがな→漢字変換は控えめに（一般的な単語のみ）
+- 話し方や表現を変更しない
+- 文章の構造や内容は一切変更しない
+- 「ここに入っている」「えーっと」などの自然な話し言葉はそのまま保持
 
-補正後のテキストのみを返してください。`;
+元の音声入力の自然さを保った補正後テキストのみを返してください。`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
