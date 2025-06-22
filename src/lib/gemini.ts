@@ -5,6 +5,11 @@ const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY!;
 const genAI = new GoogleGenerativeAI(apiKey);
 
 export async function correctTranscription(rawText: string): Promise<string> {
+  // 短いテキストや空の場合は補正しない
+  if (!rawText || rawText.trim().length < 3) {
+    return rawText;
+  }
+
   try {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
     
@@ -30,7 +35,20 @@ export async function correctTranscription(rawText: string): Promise<string> {
     return correctedText;
   } catch (error) {
     console.error('Error correcting transcription:', error);
-    // エラー時は元のテキストを返す
+    
+    // API制限やサービス不可の場合は元のテキストを返す
+    if (error instanceof Error) {
+      const errorMessage = error.message;
+      if (errorMessage.includes('503') || 
+          errorMessage.includes('429') || 
+          errorMessage.includes('quota') ||
+          errorMessage.includes('unavailable')) {
+        console.warn('Gemini API temporarily unavailable, using original text');
+        return rawText;
+      }
+    }
+    
+    // その他のエラーも元のテキストを返す
     return rawText;
   }
 }
