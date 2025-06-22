@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { VoiceResponse, REPORT_QUESTIONS } from '@/types/report';
 import { SpeechRecognition } from '@/lib/speech';
 import { correctTranscription } from '@/lib/gemini';
+import { supabase } from '@/lib/supabase';
 
 interface VoiceInputProps {
   onComplete: (responses: VoiceResponse[]) => void;
@@ -14,6 +15,8 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [responses, setResponses] = useState<VoiceResponse[]>(initialResponses);
   const [editingAnswer, setEditingAnswer] = useState('');
+  const [questions, setQuestions] = useState<string[]>([...REPORT_QUESTIONS]);
+  const [questionsLoading, setQuestionsLoading] = useState(true);
   
   // 音声入力関連の状態
   const [isListening, setIsListening] = useState(false);
@@ -27,13 +30,38 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
   const speechRef = useRef<SpeechRecognition | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // 質問を取得
+  const fetchQuestions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('questions')
+        .select('text')
+        .order('order_index', { ascending: true });
+
+      if (error) {
+        console.warn('Questions table not found, using default questions');
+        setQuestions([...REPORT_QUESTIONS]);
+      } else {
+        setQuestions(data.map(q => q.text));
+      }
+    } catch (err) {
+      console.error('Error fetching questions:', err);
+      setQuestions([...REPORT_QUESTIONS]);
+    } finally {
+      setQuestionsLoading(false);
+    }
+  };
+
   useEffect(() => {
     speechRef.current = new SpeechRecognition();
-    
+    fetchQuestions();
+  }, []);
+
+  useEffect(() => {
     // 既存の回答がある場合、現在の質問のインデックスを調整
-    if (initialResponses.length > 0) {
+    if (initialResponses.length > 0 && questions.length > 0) {
       const lastAnsweredIndex = Math.max(...initialResponses.map(r => r.questionIndex));
-      setCurrentQuestionIndex(Math.min(lastAnsweredIndex + 1, REPORT_QUESTIONS.length - 1));
+      setCurrentQuestionIndex(Math.min(lastAnsweredIndex + 1, questions.length - 1));
       
       // 現在の質問に既存の回答がある場合
       const currentAnswer = initialResponses.find(r => r.questionIndex === currentQuestionIndex);
@@ -41,7 +69,7 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
         setEditingAnswer(currentAnswer.answer);
       }
     }
-  }, [initialResponses, currentQuestionIndex]);
+  }, [initialResponses, currentQuestionIndex, questions]);
 
   // ファイナルテキストを処理
   const processFinalTranscript = async (finalText: string) => {
@@ -71,6 +99,8 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
     setError(null);
     // 新しい音声入力セッション開始時にリセット
     setProcessedFinalTranscripts(new Set());
+    // 音声入力開始時に確定済みセグメントもクリア
+    setConfirmedSegments([]);
 
     speechRef.current.startListening(
       (transcript, isFinal) => {
@@ -130,7 +160,7 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
     }
 
     const newResponse: VoiceResponse = {
-      question: REPORT_QUESTIONS[currentQuestionIndex],
+      question: questions[currentQuestionIndex],
       answer: editingAnswer.trim(),
       questionIndex: currentQuestionIndex
     };
@@ -148,7 +178,7 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
     setResponses(updatedResponses);
 
     // 次の質問へ
-    if (currentQuestionIndex < REPORT_QUESTIONS.length - 1) {
+    if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
       setEditingAnswer('');
     }
@@ -165,16 +195,25 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
     }
   };
 
-  const currentQuestion = REPORT_QUESTIONS[currentQuestionIndex];
-  const progress = ((responses.length) / REPORT_QUESTIONS.length) * 100;
+  const currentQuestion = questions[currentQuestionIndex];
+  const progress = ((responses.length) / questions.length) * 100;
   const currentAnswer = responses.find(r => r.questionIndex === currentQuestionIndex);
+
+  if (questionsLoading) {
+    return (
+      <div className="max-w-2xl mx-auto text-center py-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p className="text-gray-600">質問を読み込み中...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-2xl mx-auto">
       {/* プログレスバー */}
       <div className="mb-6">
         <div className="flex justify-between text-sm text-gray-600 mb-2">
-          <span>質問 {currentQuestionIndex + 1} / {REPORT_QUESTIONS.length}</span>
+          <span>質問 {currentQuestionIndex + 1} / {questions.length}</span>
           <span>{Math.round(progress)}% 完了</span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2">
@@ -248,7 +287,7 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
             />
             
             {/* 音声入力中のオーバーレイ */}
-            {isListening && (confirmedSegments.length > 0 || pendingTranscript) && (
+            {isListening && (
               <div className="absolute inset-0 bg-white/95 backdrop-blur-sm rounded-xl p-6 overflow-y-auto">
                 <div className="mb-4">
                   <div className="flex items-center space-x-2 mb-3">
@@ -357,7 +396,7 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
       {responses.length > 0 && (
         <div className="mt-6 p-4 bg-gray-50 rounded-lg">
           <div className="flex flex-wrap gap-2">
-            {REPORT_QUESTIONS.map((_, index) => {
+            {questions.map((_, index) => {
               const answer = responses.find(r => r.questionIndex === index);
               const isActive = index === currentQuestionIndex;
               
@@ -383,7 +422,7 @@ export default function VoiceInput({ onComplete, initialResponses = [] }: VoiceI
       )}
 
       {/* 完了ボタン */}
-      {responses.length === REPORT_QUESTIONS.length && (
+      {responses.length === questions.length && (
         <div className="mt-6 text-center">
           <button
             onClick={() => onComplete(responses)}

@@ -24,6 +24,14 @@ export interface ReportFormData {
   responses: VoiceResponse[];
 }
 
+export interface Question {
+  id: string;
+  text: string;
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export const REPORT_QUESTIONS = [
   "今日はどんなお客様の対応をしましたか？",
   "印象に残ったお客様はいらっしゃいましたか？", 

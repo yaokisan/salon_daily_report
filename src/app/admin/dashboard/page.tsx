@@ -9,7 +9,7 @@ import { Staff } from '@/types/report';
 export default function AdminDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'reports' | 'staff'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'staff' | 'questions'>('reports');
   const [staff, setStaff] = useState<Staff[]>([]);
   const [newStaffName, setNewStaffName] = useState('');
   const [isAddingStaff, setIsAddingStaff] = useState(false);
@@ -149,12 +149,37 @@ export default function AdminDashboard() {
               >
                 👥 スタッフ管理
               </button>
+              <button
+                onClick={() => setActiveTab('questions')}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === 'questions'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                ❓ 質問管理
+              </button>
             </nav>
           </div>
         </div>
 
         {/* コンテンツ */}
         {activeTab === 'reports' && <AdminReportList />}
+        
+        {activeTab === 'questions' && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="text-center">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">質問管理</h3>
+              <p className="text-gray-600 mb-6">日報作成時の質問内容を編集・管理できます</p>
+              <button
+                onClick={() => router.push('/admin/questions')}
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition duration-200"
+              >
+                質問管理ページへ →
+              </button>
+            </div>
+          </div>
+        )}
 
         {activeTab === 'staff' && (
           <div className="space-y-6">
